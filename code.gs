@@ -831,19 +831,47 @@ function getFimmCacheStatus() {
   } catch(e) { return JSON.stringify({ count: 0, updated: '' }); }
 }
 
+function ensureFimmNavCacheSheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (ss.getSheetByName(FIMM_NAV_SHEET)) return false;
+  const sheet = ss.insertSheet(FIMM_NAV_SHEET);
+  ss.setActiveSheet(sheet);
+  ss.moveActiveSheet(ss.getNumSheets());
+  sheet.setRowHeight(1, 36);
+  sheet.getRange(1, 1, 1, 5).setValues([['Fund Code', 'Fund Name', 'NAV', 'Updated', 'Source']])
+    .setBackground('#1565c0').setFontColor('#ffffff').setFontWeight('bold')
+    .setFontSize(11).setVerticalAlignment('middle');
+  sheet.setColumnWidth(1, 120); sheet.setColumnWidth(2, 380);
+  sheet.setColumnWidth(3, 100); sheet.setColumnWidth(4, 140); sheet.setColumnWidth(5, 80);
+  sheet.getRange(2, 1).setValue('Cache is empty — use "Refresh FIMM NAV Cache Now" from the Finance menu to populate.');
+  return true;
+}
+
 function createMutualFundSheet() {
   const ui = SpreadsheetApp.getUi();
   const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // 1. Ensure FIMM NAV Cache sheet exists
+  const cacheCreated = ensureFimmNavCacheSheet_();
+
+  // 2. Create or reuse MF sheet
   let sheet = ss.getSheetByName(MF_SHEET_NAME);
   if (sheet) {
     ui.alert('The Mutual Fund sheet already exists.\n\nClick the "🏦 Mutual Funds" tab to view it.');
     sheet.activate();
-    return;
+  } else {
+    sheet = ss.insertSheet(MF_SHEET_NAME, 1);
+    buildMutualFundSheet_(sheet);
+    sheet.activate();
+    if (cacheCreated) {
+      ui.alert('✅ Mutual Fund & FIMM NAV Cache sheets created!\n\nRun "Refresh FIMM NAV Cache Now" from the Finance menu to populate fund data before searching.\n\nOpening Add Fund dialog…');
+    } else {
+      ui.alert('✅ Mutual Fund sheet created!\n\nOpening Add Fund dialog…');
+    }
   }
-  sheet = ss.insertSheet(MF_SHEET_NAME, 1);
-  buildMutualFundSheet_(sheet);
-  sheet.activate();
-  ui.alert('Mutual Fund sheet created!\n\nUse "Add Fund" from the menu to add your first fund.');
+
+  // 3. Show Add Fund dialog
+  showAddFundDialog();
 }
 
 function buildMutualFundSheet_(sheet) {
@@ -897,6 +925,7 @@ function showAddFundDialog() {
   if (!ss.getSheetByName(MF_SHEET_NAME)) {
     const resp = ui.alert('No Mutual Fund sheet found.', 'Create it now?', ui.ButtonSet.YES_NO);
     if (resp === ui.Button.YES) createMutualFundSheet(); else return;
+    return; // createMutualFundSheet() will call showAddFundDialog() itself
   }
   const allAccounts = ss.getSheets()
     .filter(s => s.getRange('F2').getValue().toString().includes('Balance'))
@@ -916,6 +945,10 @@ function showAddFundDialog() {
     '.result-item{padding:8px 10px;cursor:pointer;border-bottom:1px solid #f1f3f4;font-size:12px}' +
     '.result-item:hover{background:#e8f0fe}' +
     '.result-item .code{color:#1a73e8;font-weight:bold;margin-right:6px}' +
+    '.enter-manual-link{color:#1a73e8;cursor:pointer;text-decoration:underline;margin-left:6px;font-size:12px}' +
+    '.manual-form{background:#fff;border:1px solid #dadce0;border-radius:6px;padding:12px;margin-top:6px;display:none}' +
+    '.manual-form-title{font-size:12px;font-weight:600;color:#3c4043;margin-bottom:8px}' +
+    '.manual-confirm-btn{margin-top:10px;padding:6px 16px;background:#1a73e8;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600}' +
     '.selected-fund{background:#e8f4fd;border:1px solid #1a73e8;border-radius:6px;padding:8px 10px;margin-top:4px;font-size:12px;display:none}' +
     '.nav-badge{display:inline-block;background:#e6f4ea;color:#137333;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:bold;margin-left:6px}' +
     '.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}' +
@@ -926,13 +959,29 @@ function showAddFundDialog() {
     '.no-acct-warn{background:#fff3cd;border:1px solid #ffc107;border-radius:6px;padding:7px 10px;font-size:12px;color:#856404;margin-top:4px;display:none}' +
     '.spinner{display:none;color:#5f6368;font-size:12px;margin-top:4px}' +
     '</style></head><body>' +
-    '<h2>Add Mutual Fund / Unit Trust</h2>' + '<div id="cacheStatus" style="background:#e8f5e9;border:1px solid #a5d6a7;border-radius:6px;padding:6px 10px;font-size:11px;color:#2e7d32;margin-bottom:10px">&#x231B; Checking FIMM NAV cache...</div>' +
+    '<h2>Add Mutual Fund / Unit Trust</h2>' +
+    '<div id="cacheStatus" style="background:#e8f5e9;border:1px solid #a5d6a7;border-radius:6px;padding:6px 10px;font-size:11px;color:#2e7d32;margin-bottom:10px">&#x231B; Checking FIMM NAV cache...</div>' +
     '<label>Search Fund by Name or Code</label>' +
     '<div class="search-row">' +
     '<input type="text" id="searchInput" placeholder="e.g. RHB Cash Management or MANUAG" />' +
     '<button class="search-btn" onclick="doSearch()">Search</button></div>' +
     '<div class="spinner" id="spinner">Searching FIMM cache...</div>' +
     '<div class="results-list" id="resultsList"></div>' +
+    '<div class="manual-form" id="manualForm">' +
+    '<div class="manual-form-title">Enter Fund Details Manually</div>' +
+    '<label>Fund Name</label>' +
+    '<input type="text" id="manualName" placeholder="e.g. RHB Cash Management Fund" />' +
+    '<label>Fund Code</label>' +
+    '<input type="text" id="manualCode" placeholder="e.g. RHBCASH" />' +
+    '<label>Currency</label>' +
+    '<select id="manualCurrency">' +
+    '<option value="MYR">MYR – Malaysian Ringgit</option>' +
+    '<option value="USD">USD – US Dollar</option>' +
+    '<option value="SGD">SGD – Singapore Dollar</option>' +
+    '<option value="HKD">HKD – Hong Kong Dollar</option>' +
+    '</select>' +
+    '<div style="text-align:right"><button class="manual-confirm-btn" onclick="confirmManual()">Confirm</button></div>' +
+    '</div>' +
     '<div class="selected-fund" id="selectedFund"></div>' +
     '<div id="mainForm" style="display:none">' +
     '<div class="row2">' +
@@ -950,81 +999,114 @@ function showAddFundDialog() {
     '<button class="btn btn-cancel" onclick="google.script.host.close()">Cancel</button>' +
     '<button class="btn btn-primary" id="saveBtn" onclick="save()" style="display:none">Add Fund</button></div>' +
     '<script>' +
-    'var ALL_ACCOUNTS=' + accountsJson + ';' + 'google.script.run.withSuccessHandler(function(j){var d=JSON.parse(j);var el=document.getElementById(\'cacheStatus\');if(d.count>0){el.textContent=\'\u{1F4CB} FIMM NAV Cache: \'+d.count+\' funds loaded\'+(d.updated?\' \u00b7 Last updated: \'+d.updated:\'\');}else{el.style.background=\'#fff3e0\';el.style.color=\'#e65100\';el.style.borderColor=\'#ffcc80\';el.textContent=\'\u26A0\uFE0F FIMM NAV cache is empty \u2014 run Refresh FIMM NAV Cache Now first.\';}}).getFimmCacheStatus();' +
+    'var ALL_ACCOUNTS=' + accountsJson + ';' +
+    'google.script.run.withSuccessHandler(function(j){' +
+    '  var d=JSON.parse(j);var el=document.getElementById("cacheStatus");' +
+    '  if(d.count>0){el.textContent="\u{1F4CB} FIMM NAV Cache: "+d.count+" funds loaded"+(d.updated?" \u00b7 Last updated: "+d.updated:"");}' +
+    '  else{el.style.background="#fff3e0";el.style.color="#e65100";el.style.borderColor="#ffcc80";' +
+    '  el.textContent="\u26A0\uFE0F FIMM NAV cache is empty \u2014 run Refresh FIMM NAV Cache Now first.";}' +
+    '}).getFimmCacheStatus();' +
     'var selectedCode="",selectedName="",selectedCurrency="",selectedNav=0;' +
     'function doSearch(){' +
-    'var kw=document.getElementById("searchInput").value.trim();if(!kw)return;' +
-    'document.getElementById("spinner").style.display="block";' +
-    'document.getElementById("resultsList").style.display="none";' +
-    'google.script.run.withSuccessHandler(showResults)' +
-    '.withFailureHandler(function(e){document.getElementById("spinner").style.display="none";alert("Search error: "+e.message);})' +
-    '.searchFundsForDialog(kw);}' +
+    '  var kw=document.getElementById("searchInput").value.trim();if(!kw)return;' +
+    '  document.getElementById("spinner").style.display="block";' +
+    '  document.getElementById("spinner").textContent="Searching FIMM cache...";' +
+    '  document.getElementById("resultsList").style.display="none";' +
+    '  document.getElementById("manualForm").style.display="none";' +
+    '  google.script.run.withSuccessHandler(showResults)' +
+    '  .withFailureHandler(function(e){document.getElementById("spinner").style.display="none";alert("Search error: "+e.message);})' +
+    '  .searchFundsForDialog(kw);}' +
     'function showResults(json){' +
-    'document.getElementById("spinner").style.display="none";' +
-    'var results=JSON.parse(json);' +
-    'var list=document.getElementById("resultsList");' +
-    'if(!results.length){list.innerHTML=\'<div class="result-item">No funds found. Try a different keyword.</div>\';list.style.display="block";return;}' +
-    'list.innerHTML=results.map(function(r){' +
-    '  return "<div class=\\"result-item\\" data-code=\\""+r.code+"\\" data-name=\\""+r.name.replace(/"/g,"&quot;")+"\\" onclick=\\"pickResult(this)\\"><span class=\\"code\\">"+r.code+"</span>"+r.name+"</div>";' +
-    '}).join("");' +
-    'list.style.display="block";}' +
-    'function pickResult(el){selectFund(el.getAttribute("data-code"),el.getAttribute("data-name"));}' +
-    'function selectFund(code,name){' +
-    'document.getElementById("resultsList").style.display="none";' +
-    'document.getElementById("spinner").style.display="block";' +
-    'document.getElementById("spinner").textContent="Fetching NAV from FIMM cache...";' +
-    'selectedCode=code;selectedName=name;' +
-    'google.script.run.withSuccessHandler(onFundData)' +
-    '.withFailureHandler(function(e){document.getElementById("spinner").style.display="none";alert("Could not fetch fund data: "+e.message);})' +
-    '.getFundDataForDialog(code);}' +
-    'function onFundData(json){' +
-    'document.getElementById("spinner").style.display="none";' +
-    'var fd=JSON.parse(json);' +
-    'selectedCurrency=fd.currency||"MYR";selectedNav=fd.nav||0;' +
-    'var sf=document.getElementById("selectedFund");' +
-    'var navBadge;' +
-    'if(fd.navUnavailable||!fd.nav){' +
-    '  navBadge="<span style=\'background:#fff3e0;color:#e65100;border:1px solid #ffcc80;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:600;margin-left:8px\'>⚠️ NAV unavailable — enter manually</span>";' +
+    '  document.getElementById("spinner").style.display="none";' +
+    '  var results=JSON.parse(json);' +
+    '  var list=document.getElementById("resultsList");' +
+    '  if(!results.length){' +
+    '    list.innerHTML=\'<div class="result-item" style="cursor:default">No funds found in cache. \' +' +
+    '    \'<span class="enter-manual-link" onclick="enterManually()">Enter manually</span></div>\';' +
+    '    list.style.display="block";return;}' +
+    '  list.innerHTML=results.map(function(r){' +
+    '    return "<div class=\\"result-item\\" data-code=\\""+r.code+"\\" data-name=\\""+r.name.replace(/"/g,"&quot;")+"\\" onclick=\\"pickResult(this)\\"><span class=\\"code\\">"+r.code+"</span>"+r.name+"</div>";' +
+    '  }).join("");' +
+    '  list.style.display="block";}' +
+    'function enterManually(){' +
+    '  document.getElementById("resultsList").style.display="none";' +
+    '  document.getElementById("manualForm").style.display="block";' +
+    '  document.getElementById("manualName").focus();}' +
+    'function confirmManual(){' +
+    '  var name=document.getElementById("manualName").value.trim();' +
+    '  var code=document.getElementById("manualCode").value.trim().toUpperCase();' +
+    '  var currency=document.getElementById("manualCurrency").value;' +
+    '  if(!name){alert("Enter a fund name.");return;}' +
+    '  if(!code){alert("Enter a fund code.");return;}' +
+    '  selectedCode=code;selectedName=name;selectedCurrency=currency;selectedNav=0;' +
+    '  document.getElementById("manualForm").style.display="none";' +
+    '  var sf=document.getElementById("selectedFund");' +
+    '  sf.innerHTML="<strong>"+name+"</strong>  <span style=\'color:#5f6368\'>"+code+"</span>" +' +
+    '    "  <span style=\'background:#fff3e0;color:#e65100;border:1px solid #ffcc80;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:600;margin-left:6px\'>Manual entry</span>";' +
+    '  sf.style.display="block";' +
     '  document.getElementById("buyNav").value="";' +
     '  document.getElementById("buyNav").placeholder="Enter buy NAV manually";' +
-    '}else{' +
-    '  navBadge="<span class=\'nav-badge\'>NAV: "+selectedCurrency+" "+fd.nav.toFixed(4)+"</span>"+(fd.date?"  <span style=\'color:#9aa0a6;font-size:11px\'>as of "+fd.date+"</span>":"");' +
-    '  document.getElementById("buyNav").value=fd.nav.toFixed(4);' +
-    '}' +
-    'sf.innerHTML="<strong>"+selectedName+"</strong>  <span style=\'color:#5f6368\'>"+selectedCode+"</span>"+navBadge;' +
-    'sf.style.display="block";' +
-    'document.getElementById("mainForm").style.display="block";' +
-    'document.getElementById("saveBtn").style.display="inline-block";' +
-    'buildAccountDropdown(selectedCurrency);updateCost();}' +
+    '  document.getElementById("mainForm").style.display="block";' +
+    '  document.getElementById("saveBtn").style.display="inline-block";' +
+    '  buildAccountDropdown(currency);updateCost();}' +
+    'function pickResult(el){selectFund(el.getAttribute("data-code"),el.getAttribute("data-name"));}' +
+    'function selectFund(code,name){' +
+    '  document.getElementById("resultsList").style.display="none";' +
+    '  document.getElementById("spinner").style.display="block";' +
+    '  document.getElementById("spinner").textContent="Fetching NAV from FIMM cache...";' +
+    '  selectedCode=code;selectedName=name;' +
+    '  google.script.run.withSuccessHandler(onFundData)' +
+    '  .withFailureHandler(function(e){document.getElementById("spinner").style.display="none";alert("Could not fetch fund data: "+e.message);})' +
+    '  .getFundDataForDialog(code);}' +
+    'function onFundData(json){' +
+    '  document.getElementById("spinner").style.display="none";' +
+    '  var fd=JSON.parse(json);' +
+    '  selectedCurrency=fd.currency||"MYR";selectedNav=fd.nav||0;' +
+    '  var sf=document.getElementById("selectedFund");' +
+    '  var navBadge;' +
+    '  if(fd.navUnavailable||!fd.nav){' +
+    '    navBadge="<span style=\'background:#fff3e0;color:#e65100;border:1px solid #ffcc80;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:600;margin-left:8px\'>\u26a0\ufe0f NAV unavailable \u2014 enter manually</span>";' +
+    '    document.getElementById("buyNav").value="";' +
+    '    document.getElementById("buyNav").placeholder="Enter buy NAV manually";' +
+    '  }else{' +
+    '    navBadge="<span class=\'nav-badge\'>NAV: "+selectedCurrency+" "+fd.nav.toFixed(4)+"</span>"+(fd.date?"  <span style=\'color:#9aa0a6;font-size:11px\'>as of "+fd.date+"</span>":"");' +
+    '    document.getElementById("buyNav").value=fd.nav.toFixed(4);' +
+    '  }' +
+    '  sf.innerHTML="<strong>"+selectedName+"</strong>  <span style=\'color:#5f6368\'>"+selectedCode+"</span>"+navBadge;' +
+    '  sf.style.display="block";' +
+    '  document.getElementById("mainForm").style.display="block";' +
+    '  document.getElementById("saveBtn").style.display="inline-block";' +
+    '  buildAccountDropdown(selectedCurrency);updateCost();}' +
     'function buildAccountDropdown(currency){' +
-    'var sel=document.getElementById("linkedAccount");' +
-    'var warn=document.getElementById("noAcctWarn");' +
-    'var matching=ALL_ACCOUNTS.filter(function(a){return a.currency===currency||(currency==="MYR"&&a.currency==="MYR");});' +
-    'sel.innerHTML=\'<option value="">— None (no deduction) —</option>\';' +
-    'matching.forEach(function(a){sel.innerHTML+=\'<option value="\'+a.name+\'">\'+a.name+" ("+a.currency+")</option>";});' +
-    'if(matching.length===0){warn.textContent="No "+currency+" accounts found. Purchase cost won\'t be deducted.";warn.style.display="block";}' +
-    'else{warn.style.display="none";}}' +
+    '  var sel=document.getElementById("linkedAccount");' +
+    '  var warn=document.getElementById("noAcctWarn");' +
+    '  var matching=ALL_ACCOUNTS.filter(function(a){return a.currency===currency||(currency==="MYR"&&a.currency==="MYR");});' +
+    '  sel.innerHTML=\'<option value="">— None (no deduction) —</option>\';' +
+    '  matching.forEach(function(a){sel.innerHTML+=\'<option value="\'+a.name+\'">\'+a.name+" ("+a.currency+")</option>";});' +
+    '  if(matching.length===0){warn.textContent="No "+currency+" accounts found. Purchase cost won\'t be deducted.";warn.style.display="block";}' +
+    '  else{warn.style.display="none";}}' +
     'function updateCost(){' +
-    'var units=parseFloat(document.getElementById("units").value)||0;' +
-    'var nav=parseFloat(document.getElementById("buyNav").value)||0;' +
-    'var prev=document.getElementById("costPreview");' +
-    'if(units>0&&nav>0){prev.textContent="Total cost: "+(selectedCurrency||"MYR")+" "+(units*nav).toFixed(2);prev.style.display="block";}' +
-    'else{prev.style.display="none";}}' +
-    'if(!selectedCode){alert("Please search and select a fund first.");return;}' +
-    'if(!selectedCode){alert("Please search and select a fund first.");return;}' +
-    'var buyNav=parseFloat(document.getElementById("buyNav").value);' +
-    'if(!units||units<=0){alert("Enter a valid number of units.");return;}' +
-    'if(!buyNav||buyNav<=0){alert("Enter a valid buy NAV.");return;}' +
-    'var account=document.getElementById("linkedAccount").value;' +
-    'var notes=document.getElementById("notes").value.trim();' +
-    'document.getElementById("saveBtn").disabled=true;' +
-    'document.getElementById("saveBtn").textContent="Saving...";' +
-    'google.script.run.withSuccessHandler(function(){google.script.host.close();})' +
-    '.withFailureHandler(function(e){document.getElementById("saveBtn").disabled=false;document.getElementById("saveBtn").textContent="Add Fund";alert("Error: "+e.message);})' +
-    '.saveFund(selectedCode,selectedName,units,buyNav,selectedCurrency,account,notes);}' +
+    '  var units=parseFloat(document.getElementById("units").value)||0;' +
+    '  var nav=parseFloat(document.getElementById("buyNav").value)||0;' +
+    '  var prev=document.getElementById("costPreview");' +
+    '  if(units>0&&nav>0){prev.textContent="Total cost: "+(selectedCurrency||"MYR")+" "+(units*nav).toFixed(2);prev.style.display="block";}' +
+    '  else{prev.style.display="none";}}' +
+    'function save(){' +
+    '  var units=parseFloat(document.getElementById("units").value);' +
+    '  if(!selectedCode){alert("Please search and select a fund first.");return;}' +
+    '  var buyNav=parseFloat(document.getElementById("buyNav").value);' +
+    '  if(!units||units<=0){alert("Enter a valid number of units.");return;}' +
+    '  if(!buyNav||buyNav<=0){alert("Enter a valid buy NAV.");return;}' +
+    '  var account=document.getElementById("linkedAccount").value;' +
+    '  var notes=document.getElementById("notes").value.trim();' +
+    '  document.getElementById("saveBtn").disabled=true;' +
+    '  document.getElementById("saveBtn").textContent="Saving...";' +
+    '  google.script.run.withSuccessHandler(function(){google.script.host.close();})' +
+    '  .withFailureHandler(function(e){document.getElementById("saveBtn").disabled=false;document.getElementById("saveBtn").textContent="Add Fund";alert("Error: "+e.message);})' +
+    '  .saveFund(selectedCode,selectedName,units,buyNav,selectedCurrency,account,notes);}' +
     'document.getElementById("searchInput").addEventListener("keydown",function(e){if(e.key==="Enter")doSearch();});' +
     '</script></body></html>'
-  ).setWidth(520).setHeight(560).setTitle('Add Mutual Fund');
+  ).setWidth(520).setHeight(600).setTitle('Add Mutual Fund');
   SpreadsheetApp.getUi().showModalDialog(html, 'Add Mutual Fund');
 }
 
@@ -1818,19 +1900,63 @@ function saveStock(code, company, shares, buyPrice, sector, notes, linkedAccount
   // References B{row} (ticker, e.g. MAYBANK) — col A has numeric code, col B has ticker.
   // Table 1 on the dividend page: col1=Ex-Date, col2=Amount, col4=Pay Date
   const aRef = 'B' + row;
-  var divUrl;
-  if      (market === 'MY') divUrl = 'CONCATENATE("https://stockanalysis.com/quote/klse/",' + aRef + ',"/dividend/")';
-  else if (market === 'US') divUrl = 'CONCATENATE("https://stockanalysis.com/stocks/",LOWER(' + aRef + '),"/dividend/")';
-  else if (market === 'SG') divUrl = 'CONCATENATE("https://stockanalysis.com/quote/sgx/",' + aRef + ',"/dividend/")';
-  else if (market === 'HK') divUrl = 'CONCATENATE("https://stockanalysis.com/quote/hkg/",' + aRef + ',"/dividend/")';
-  if (market !== 'CN' && divUrl) {
-    var ccy = market === 'MY' ? ' MYR' : market === 'SG' ? ' SGD' : market === 'HK' ? ' HKD' : '$';
-    // Dividend amount — strip currency suffix (e.g. ' MYR', ' USD', ' SGD', ' HKD')
-    const divAmtFml = '=IFERROR(VALUE(SUBSTITUTE(INDEX(IMPORTHTML(' + divUrl + ',"table",1),2,2),"' + ccy + '","")),"No Data")';
-    // Ex-date and Pay-date — plain text, col1 and col4
-    const exDateFml  = '=IFERROR(VALUE(SUBSTITUTE(INDEX(IMPORTHTML(CONCATENATE("https://stockanalysis.com/quote/klse/",$B' + row + ',"/dividend/"),"table",1),2,1)," MYR","")),"No Data")';
-    const payDateFml = '=IFERROR(VALUE(SUBSTITUTE(INDEX(IMPORTHTML(CONCATENATE("https://stockanalysis.com/quote/klse/",$B' + row + ',"/dividend/"),"table",1),2,4)," MYR","")),"No Data")';
-    const divYldFml = '=IFERROR(IMPORTXML(CONCATENATE("https://stockanalysis.com/quote/klse/",$B' + row + ',"/dividend/"),"/html/body/div/div[1]/div[2]/main/div[2]/div/div[2]/div[1]/div")*100,"N/A")';
+  if (market !== 'CN') {
+    // stockanalysis.com table structure (single table per page):
+    // col1=Ex-Date, col2=Amount ("$0.26" for US, "0.06 MYR" for MY etc.), col4=Pay Date
+    // Dates are in "Feb 9, 2026" format; CLEAN+TRIM normalises whitespace before DATEVALUE.
+    var divAmtFml, exDateFml, payDateFml, divYldFml;
+    const xpYld = '/html/body/div/div[1]/div[2]/main/div[2]/div/div[2]/div[1]/div';
+    if (market === 'US') {
+      // US stocks use /stocks/{ticker}/ and ETFs use /etf/{ticker}/ — try stocks first, ETF as fallback
+      const stockUrl = 'CONCATENATE("https://stockanalysis.com/stocks/",LOWER(' + aRef + '),"/dividend/")';
+      const etfUrl   = 'CONCATENATE("https://stockanalysis.com/etf/",LOWER(' + aRef + '),"/dividend/")';
+      divAmtFml = '=IFERROR('
+        + 'VALUE(SUBSTITUTE(INDEX(IMPORTHTML(' + stockUrl + ',"table",1),2,2),"$","")),'
+        + 'IFERROR('
+        + 'VALUE(SUBSTITUTE(INDEX(IMPORTHTML(' + etfUrl + ',"table",1),2,2),"$","")),'
+        + '"No Data"))';
+      exDateFml = '=IFERROR('
+        + 'DATEVALUE(CLEAN(TRIM(INDEX(IMPORTHTML(' + stockUrl + ',"table",1),2,1)))),'
+        + 'IFERROR('
+        + 'DATEVALUE(CLEAN(TRIM(INDEX(IMPORTHTML(' + etfUrl + ',"table",1),2,1)))),'
+        + 'IFERROR('
+        + 'CLEAN(TRIM(INDEX(IMPORTHTML(' + stockUrl + ',"table",1),2,1))),'
+        + 'IFERROR('
+        + 'CLEAN(TRIM(INDEX(IMPORTHTML(' + etfUrl + ',"table",1),2,1))),'
+        + '"No Data"))))';
+      payDateFml = '=IFERROR('
+        + 'DATEVALUE(CLEAN(TRIM(INDEX(IMPORTHTML(' + stockUrl + ',"table",1),2,4)))),'
+        + 'IFERROR('
+        + 'DATEVALUE(CLEAN(TRIM(INDEX(IMPORTHTML(' + etfUrl + ',"table",1),2,4)))),'
+        + 'IFERROR('
+        + 'CLEAN(TRIM(INDEX(IMPORTHTML(' + stockUrl + ',"table",1),2,4))),'
+        + 'IFERROR('
+        + 'CLEAN(TRIM(INDEX(IMPORTHTML(' + etfUrl + ',"table",1),2,4))),'
+        + '"No Data"))))';
+      divYldFml = '=IFERROR('
+        + 'IMPORTXML(' + stockUrl + ',"' + xpYld + '")*100,'
+        + 'IFERROR('
+        + 'IMPORTXML(' + etfUrl + ',"' + xpYld + '")*100,'
+        + '"N/A"))';
+    } else {
+      var divUrl;
+      if      (market === 'MY') divUrl = 'CONCATENATE("https://stockanalysis.com/quote/klse/",' + aRef + ',"/dividend/")';
+      else if (market === 'SG') divUrl = 'CONCATENATE("https://stockanalysis.com/quote/sgx/",' + aRef + ',"/dividend/")';
+      else if (market === 'HK') divUrl = 'CONCATENATE("https://stockanalysis.com/quote/hkg/",' + aRef + ',"/dividend/")';
+      var ccy = market === 'MY' ? ' MYR' : market === 'SG' ? ' SGD' : ' HKD';
+      divAmtFml = '=IFERROR(VALUE(SUBSTITUTE(INDEX(IMPORTHTML(' + divUrl + ',"table",1),2,2),"' + ccy + '","")),"No Data")';
+      exDateFml = '=IFERROR('
+        + 'DATEVALUE(CLEAN(TRIM(INDEX(IMPORTHTML(' + divUrl + ',"table",1),2,1)))),'
+        + 'IFERROR('
+        + 'CLEAN(TRIM(INDEX(IMPORTHTML(' + divUrl + ',"table",1),2,1))),'
+        + '"No Data"))';
+      payDateFml = '=IFERROR('
+        + 'DATEVALUE(CLEAN(TRIM(INDEX(IMPORTHTML(' + divUrl + ',"table",1),2,4)))),'
+        + 'IFERROR('
+        + 'CLEAN(TRIM(INDEX(IMPORTHTML(' + divUrl + ',"table",1),2,4))),'
+        + '"No Data"))';
+      divYldFml = '=IFERROR(IMPORTXML(' + divUrl + ',"' + xpYld + '")*100,"N/A")';
+    }
     sheet.getRange(row,10).setFormula(divAmtFml)
       .setNumberFormat('0.0000').setHorizontalAlignment('right').setVerticalAlignment('middle');
     sheet.getRange(row,11).setFormula(divYldFml)
@@ -2671,18 +2797,63 @@ function refreshDividendInfo() {
     if (!code) continue;
 
     const aRef = 'B' + row;  // Col B = ticker (e.g. MAYBANK), not numeric code
-    var divUrl;
-    if      (market === 'MY') divUrl = 'CONCATENATE("https://stockanalysis.com/quote/klse/",' + aRef + ',"/dividend/")';
-    else if (market === 'US') divUrl = 'CONCATENATE("https://stockanalysis.com/stocks/",LOWER(' + aRef + '),"/dividend/")';
-    else if (market === 'SG') divUrl = 'CONCATENATE("https://stockanalysis.com/quote/sgx/",' + aRef + ',"/dividend/")';
-    else if (market === 'HK') divUrl = 'CONCATENATE("https://stockanalysis.com/quote/hkg/",' + aRef + ',"/dividend/")';
-    if (!divUrl) continue;
-
-    var ccy = market === 'MY' ? ' MYR' : market === 'SG' ? ' SGD' : market === 'HK' ? ' HKD' : '$';
-    const divAmtFml  = '=IFERROR(VALUE(SUBSTITUTE(INDEX(IMPORTHTML(' + divUrl + ',"table",1),2,2),"' + ccy + '","")),"No Data")';
-    const divYldFml  = '=IFERROR(IMPORTXML(CONCATENATE("https://stockanalysis.com/quote/klse/",$B' + row + ',"/dividend/"),"/html/body/div/div[1]/div[2]/main/div[2]/div/div[2]/div[1]/div")*100,"N/A")';
-    const exDateFml  = '=IFERROR(VALUE(SUBSTITUTE(INDEX(IMPORTHTML(CONCATENATE("https://stockanalysis.com/quote/klse/",$B' + row + ',"/dividend/"),"table",1),2,1)," MYR","")),"No Data")';
-    const payDateFml = '=IFERROR(VALUE(SUBSTITUTE(INDEX(IMPORTHTML(CONCATENATE("https://stockanalysis.com/quote/klse/",$B' + row + ',"/dividend/"),"table",1),2,4)," MYR","")),"No Data")';
+    // stockanalysis.com table structure (single table per page):
+    // col1=Ex-Date, col2=Amount ("$0.26" for US, "0.06 MYR" for MY etc.), col4=Pay Date
+    // Dates are in "Feb 9, 2026" format; CLEAN+TRIM normalises whitespace before DATEVALUE.
+    var divAmtFml, exDateFml, payDateFml, divYldFml;
+    const xpYld = '/html/body/div/div[1]/div[2]/main/div[2]/div/div[2]/div[1]/div';
+    if (market === 'US') {
+      // US stocks use /stocks/{ticker}/ and ETFs use /etf/{ticker}/ — try stocks first, ETF as fallback
+      const stockUrl = 'CONCATENATE("https://stockanalysis.com/stocks/",LOWER(' + aRef + '),"/dividend/")';
+      const etfUrl   = 'CONCATENATE("https://stockanalysis.com/etf/",LOWER(' + aRef + '),"/dividend/")';
+      divAmtFml = '=IFERROR('
+        + 'VALUE(SUBSTITUTE(INDEX(IMPORTHTML(' + stockUrl + ',"table",1),2,2),"$","")),'
+        + 'IFERROR('
+        + 'VALUE(SUBSTITUTE(INDEX(IMPORTHTML(' + etfUrl + ',"table",1),2,2),"$","")),'
+        + '"No Data"))';
+      exDateFml = '=IFERROR('
+        + 'DATEVALUE(CLEAN(TRIM(INDEX(IMPORTHTML(' + stockUrl + ',"table",1),2,1)))),'
+        + 'IFERROR('
+        + 'DATEVALUE(CLEAN(TRIM(INDEX(IMPORTHTML(' + etfUrl + ',"table",1),2,1)))),'
+        + 'IFERROR('
+        + 'CLEAN(TRIM(INDEX(IMPORTHTML(' + stockUrl + ',"table",1),2,1))),'
+        + 'IFERROR('
+        + 'CLEAN(TRIM(INDEX(IMPORTHTML(' + etfUrl + ',"table",1),2,1))),'
+        + '"No Data"))))';
+      payDateFml = '=IFERROR('
+        + 'DATEVALUE(CLEAN(TRIM(INDEX(IMPORTHTML(' + stockUrl + ',"table",1),2,4)))),'
+        + 'IFERROR('
+        + 'DATEVALUE(CLEAN(TRIM(INDEX(IMPORTHTML(' + etfUrl + ',"table",1),2,4)))),'
+        + 'IFERROR('
+        + 'CLEAN(TRIM(INDEX(IMPORTHTML(' + stockUrl + ',"table",1),2,4))),'
+        + 'IFERROR('
+        + 'CLEAN(TRIM(INDEX(IMPORTHTML(' + etfUrl + ',"table",1),2,4))),'
+        + '"No Data"))))';
+      divYldFml = '=IFERROR('
+        + 'IMPORTXML(' + stockUrl + ',"' + xpYld + '")*100,'
+        + 'IFERROR('
+        + 'IMPORTXML(' + etfUrl + ',"' + xpYld + '")*100,'
+        + '"N/A"))';
+    } else {
+      var divUrl;
+      if      (market === 'MY') divUrl = 'CONCATENATE("https://stockanalysis.com/quote/klse/",' + aRef + ',"/dividend/")';
+      else if (market === 'SG') divUrl = 'CONCATENATE("https://stockanalysis.com/quote/sgx/",' + aRef + ',"/dividend/")';
+      else if (market === 'HK') divUrl = 'CONCATENATE("https://stockanalysis.com/quote/hkg/",' + aRef + ',"/dividend/")';
+      else continue;
+      var ccy = market === 'MY' ? ' MYR' : market === 'SG' ? ' SGD' : ' HKD';
+      divAmtFml = '=IFERROR(VALUE(SUBSTITUTE(INDEX(IMPORTHTML(' + divUrl + ',"table",1),2,2),"' + ccy + '","")),"No Data")';
+      exDateFml = '=IFERROR('
+        + 'DATEVALUE(CLEAN(TRIM(INDEX(IMPORTHTML(' + divUrl + ',"table",1),2,1)))),'
+        + 'IFERROR('
+        + 'CLEAN(TRIM(INDEX(IMPORTHTML(' + divUrl + ',"table",1),2,1))),'
+        + '"No Data"))';
+      payDateFml = '=IFERROR('
+        + 'DATEVALUE(CLEAN(TRIM(INDEX(IMPORTHTML(' + divUrl + ',"table",1),2,4)))),'
+        + 'IFERROR('
+        + 'CLEAN(TRIM(INDEX(IMPORTHTML(' + divUrl + ',"table",1),2,4))),'
+        + '"No Data"))';
+      divYldFml = '=IFERROR(IMPORTXML(' + divUrl + ',"' + xpYld + '")*100,"N/A")';
+    }
 
     sheet.getRange(row, 10).setFormula(divAmtFml)
       .setNumberFormat('0.0000').setHorizontalAlignment('right').setVerticalAlignment('middle');
@@ -4809,6 +4980,9 @@ function renderRetirementSheet() {
   const GRAND_ROW    = GOLD_TOTAL + 2;
   const TOTAL_ROWS   = GRAND_ROW + 5;
 
+  if (sheet.getMaxRows() < TOTAL_ROWS) {
+    sheet.insertRowsAfter(sheet.getMaxRows(), TOTAL_ROWS - sheet.getMaxRows());
+  }
   compactSheet_(sheet, TOTAL_ROWS, NCOLS);
 
   // ── Helpers ──────────────────────────────────────────────────
