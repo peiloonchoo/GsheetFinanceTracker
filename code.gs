@@ -30,6 +30,7 @@ function onOpen() {
     .addItem('💸 Sell Gold',                     'showSellGoldDialog')
     .addSeparator()
     .addItem('🔄 Refresh All Prices Now',       'refreshAllStockPrices')
+    .addItem('💰 Refresh Dividend Info',          'refreshDividendInfo')
     .addItem('⏱️ Enable Auto-Refresh (5 min)',  'enableAutoRefresh')
     .addItem('⏹️ Disable Auto-Refresh',         'disableAutoRefresh')
     .addSeparator()
@@ -157,6 +158,18 @@ function createAccountFromDialog(name, currency) {
   // Hidden col G stores currency code
   sheet.getRange('G2').setValue(currency);
   sheet.hideColumns(7, 3);  // hide G (currency), H (interest rate), I (interest frequency)
+
+  // Opening balance row — RM 0.00 so the account shows 0 on the dashboard
+  // and getAccountBalances() has a valid last row to read from.
+  const today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd/MM/yyyy');
+  sheet.setRowHeight(3, 32);
+  sheet.getRange(3, 1).setValue(today).setFontColor('#9aa0a6').setFontSize(10).setVerticalAlignment('middle');
+  sheet.getRange(3, 2).setValue('Opening').setFontColor('#9aa0a6').setFontSize(10).setVerticalAlignment('middle');
+  sheet.getRange(3, 3).setValue('Opening balance').setFontColor('#9aa0a6').setFontSize(10).setVerticalAlignment('middle');
+  sheet.getRange(3, 4).setValue(0).setNumberFormat(fmt).setFontColor('#9aa0a6').setFontSize(10).setHorizontalAlignment('right').setVerticalAlignment('middle');
+  sheet.getRange(3, 5).setValue('IN').setFontColor('#9aa0a6').setFontSize(10).setHorizontalAlignment('center').setVerticalAlignment('middle');
+  sheet.getRange(3, 6).setValue(0).setNumberFormat(fmt).setFontColor('#9aa0a6').setFontSize(11).setFontWeight('bold').setHorizontalAlignment('right').setVerticalAlignment('middle');
+  sheet.getRange(3, 1, 1, 6).setBackground('#f8f9fa');
 
   sheet.setFrozenRows(2);
   sheet.setHiddenGridlines(true);
@@ -593,6 +606,7 @@ function saveTransfer(fromName, toName, amount, desc) {
     try {
       const pair  = 'CURRENCY:' + normCurrency_(fromCcy) + normCurrency_(toCcy);
       const temp  = ss.insertSheet('_FX_TEMP_');
+      compactSheet_(temp, 10, 1); // 1 col × 10 rows
       temp.getRange('A1').setFormula('=GOOGLEFINANCE("' + pair + '")');
       SpreadsheetApp.flush();
       Utilities.sleep(2000);
@@ -996,9 +1010,8 @@ function showAddFundDialog() {
     'var prev=document.getElementById("costPreview");' +
     'if(units>0&&nav>0){prev.textContent="Total cost: "+(selectedCurrency||"MYR")+" "+(units*nav).toFixed(2);prev.style.display="block";}' +
     'else{prev.style.display="none";}}' +
-    'function save(){' +
     'if(!selectedCode){alert("Please search and select a fund first.");return;}' +
-    'var units=parseFloat(document.getElementById("units").value);' +
+    'if(!selectedCode){alert("Please search and select a fund first.");return;}' +
     'var buyNav=parseFloat(document.getElementById("buyNav").value);' +
     'if(!units||units<=0){alert("Enter a valid number of units.");return;}' +
     'if(!buyNav||buyNav<=0){alert("Enter a valid buy NAV.");return;}' +
@@ -1364,7 +1377,7 @@ function getActivePortfolioSheet_() {
 }
 
 function getSheetMarket_(sheet) {
-  const v = sheet.getRange('O1').getValue();
+  const v = sheet.getRange('P1').getValue();
   return v || 'MY';
 }
 
@@ -1415,16 +1428,16 @@ function createStockPortfolioSheet() {
 
 function buildPortfolioSheet_(sheet, market) {
   const cfg = MARKET_CONFIG[market];
-  compactSheet_(sheet, 100, 16);
+  compactSheet_(sheet, 100, 17);
 
-  // Col widths: A-N + hidden O
-  const widths = [80,200,80,110,110,120,110,90,110,80,90,90,120,160];
+  // Col widths: A-O + hidden P
+  const widths = [80,200,80,110,110,120,110,90,110,80,70,90,90,120,160];
   widths.forEach((w,i) => sheet.setColumnWidth(i+1, w));
-  sheet.hideColumns(15); // O = market code
+  sheet.hideColumns(16); // P = market code
 
   // Row 1: Banner
   sheet.setRowHeight(1, 52);
-  sheet.getRange(1,1,1,14).merge()
+  sheet.getRange(1,1,1,15).merge()
     .setValue(cfg.flag + '  ' + cfg.label.toUpperCase() + '  STOCK PORTFOLIO')
     .setBackground('#0d47a1').setFontColor('#ffffff')
     .setFontSize(16).setFontWeight('bold')
@@ -1432,7 +1445,7 @@ function buildPortfolioSheet_(sheet, market) {
 
   // Row 2: subtitle
   sheet.setRowHeight(2, 26);
-  sheet.getRange(2,1,1,14).merge()
+  sheet.getRange(2,1,1,15).merge()
     .setValue(cfg.subtitle)
     .setBackground('#e8f0fe').setFontColor('#5f6368')
     .setFontSize(10).setHorizontalAlignment('center').setVerticalAlignment('middle');
@@ -1440,7 +1453,7 @@ function buildPortfolioSheet_(sheet, market) {
   // Row 3: Headers
   sheet.setRowHeight(3, 32);
   const headers = ['Code','Company','Shares','Avg Buy Price','Current Price','Market Value',
-    'Gain/Loss','Gain %','Sector','Dividend','Ex-Date','Pay Date','Last Updated','Notes'];
+    'Gain/Loss','Gain %','Sector','Dividend','DIV %','Ex-Date','Pay Date','Last Updated','Notes'];
   headers.forEach((h,i) => {
     sheet.getRange(3,i+1)
       .setValue(h).setBackground('#1a73e8').setFontColor('#ffffff')
@@ -1448,8 +1461,8 @@ function buildPortfolioSheet_(sheet, market) {
       .setHorizontalAlignment('center').setVerticalAlignment('middle');
   });
 
-  // Store market code in O1
-  sheet.getRange('O1').setValue(market);
+  // Store market code in P1
+  sheet.getRange('P1').setValue(market);
   sheet.setFrozenRows(3);
   sheet.setHiddenGridlines(true);
 }
@@ -1465,7 +1478,7 @@ function buildPortfolioSheet_(sheet, market) {
 function KLSE(stockCode) {
   try {
     const code    = stockCode.toString().trim();
-    const url     = 'https://klsescreener.com/v2/stocks/quote/' + code;
+    const url     = 'https://www.klsescreener.com/v2/stocks/' + code;
     const cookie  = Array.from({length:26}, () => 'abcdefghijklmnopqrstuvwxyz0123456789'[Math.floor(Math.random()*36)]).join('');
     const res     = UrlFetchApp.fetch(url, {
       muteHttpExceptions: true,
@@ -1474,9 +1487,19 @@ function KLSE(stockCode) {
     if (res.getResponseCode() !== 200) return 'N/A';
     const text    = res.getContentText();
     const match   = text.match(/data-value="([\d.]+)"/);
-    if (!match) return 'N/A';
-    const price   = parseFloat(match[1]);
-    return isNaN(price) ? 'N/A' : price;
+    if (match) {
+      const price = parseFloat(match[1]);
+      if (!isNaN(price)) return price;
+    }
+    // Fallback: Yahoo Finance v8 API (code must be numeric KLSE code like 1155)
+    const yfUrl = 'https://query1.finance.yahoo.com/v8/finance/chart/' + code + '.KL?interval=1d&range=1d';
+    const yfRes = UrlFetchApp.fetch(yfUrl, { muteHttpExceptions: true, headers: { 'User-Agent': 'Mozilla/5.0' } });
+    if (yfRes.getResponseCode() === 200) {
+      const yfJson  = JSON.parse(yfRes.getContentText());
+      const yfPrice = yfJson?.chart?.result?.[0]?.meta?.regularMarketPrice;
+      if (yfPrice && !isNaN(yfPrice)) return yfPrice;
+    }
+    return 'N/A';
   } catch(e) { return 'Error: ' + e.message; }
 }
 
@@ -1486,16 +1509,21 @@ function KLSE(stockCode) {
  * @customfunction
  */
 function SGX(stockCode) {
+  // Uses Yahoo Finance v8 JSON API — growbeansprout.com is defunct
   try {
-    const code = stockCode.toString().trim().toUpperCase();
-    const url  = 'https://growbeansprout.com/' + code + '.SI';
-    const res  = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+    const code   = stockCode.toString().trim().toUpperCase();
+    const symbol = code.includes('.SI') ? code : code + '.SI';
+    const url    = 'https://query1.finance.yahoo.com/v8/finance/chart/' + symbol +
+                   '?interval=1d&range=1d';
+    const res    = UrlFetchApp.fetch(url, {
+      muteHttpExceptions: true,
+      headers: { 'User-Agent': 'Mozilla/5.0' }
+    });
     if (res.getResponseCode() !== 200) return 'N/A';
-    const text  = res.getContentText();
-    const match = text.match(/class="[^"]*text-3xl[^"]*"[^>]*>([\d.,]+)</);
-    if (!match) return 'N/A';
-    const price = parseFloat(match[1].replace(',',''));
-    return isNaN(price) ? 'N/A' : price;
+    const json  = JSON.parse(res.getContentText());
+    const price = json?.chart?.result?.[0]?.meta?.regularMarketPrice;
+    if (!price || isNaN(price)) return 'N/A';
+    return price;
   } catch(e) { return 'Error: ' + e.message; }
 }
 
@@ -1522,6 +1550,113 @@ function CNStock(stockCode) {
     return (isNaN(price) || price === 0) ? 'No Data' : price;
   } catch(e) { return 'Error: ' + e.message; }
 }
+
+// ── DIVIDEND CUSTOM FUNCTIONS (StockAnalysis.com __data.json) ─
+/**
+ * Fetches dividend data from StockAnalysis.com for a given stock.
+ * Returns a 3-element array [amount, exDate, payDate] or null on failure.
+ * Internal helper used by StockDividend, StockExDate, StockPayDate.
+ */
+function fetchStockDividendData_(code, market) {
+  try {
+    const c = code.toString().trim();
+    let url;
+    if      (market === 'MY') url = 'https://stockanalysis.com/quote/klse/' + encodeURIComponent(c) + '/dividend/__data.json?x-sveltekit-trailing-slash=1';
+    else if (market === 'US') url = 'https://stockanalysis.com/stocks/'     + encodeURIComponent(c.toLowerCase()) + '/dividend/__data.json?x-sveltekit-trailing-slash=1';
+    else if (market === 'SG') url = 'https://stockanalysis.com/quote/sgx/'  + encodeURIComponent(c) + '/dividend/__data.json?x-sveltekit-trailing-slash=1';
+    else if (market === 'HK') url = 'https://stockanalysis.com/quote/hkg/'  + encodeURIComponent(c) + '/dividend/__data.json?x-sveltekit-trailing-slash=1';
+    else return null;
+
+    const res = UrlFetchApp.fetch(url, {
+      muteHttpExceptions: true,
+      headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' }
+    });
+    if (res.getResponseCode() !== 200) return null;
+
+    const json    = JSON.parse(res.getContentText());
+    const nodes   = json.nodes || [];
+    let dataArr   = null;
+    let root      = null;
+
+    // SvelteKit deduplication: find the node whose data[] has {infoTable, history}
+    for (let n = nodes.length - 1; n >= 0; n--) {
+      const nd = nodes[n];
+      if (!nd || nd.type !== 'data' || !Array.isArray(nd.data)) continue;
+      for (let i = 0; i < nd.data.length; i++) {
+        const item = nd.data[i];
+        if (item && typeof item === 'object' && 'infoTable' in item && 'history' in item) {
+          dataArr = nd.data; root = item; break;
+        }
+      }
+      if (root) break;
+    }
+    if (!root) return null;
+
+    function res_(ref) { return typeof ref === 'number' ? dataArr[ref] : ref; }
+
+    // Most-recent dividend row
+    const histIdxs = res_(root.history);
+    if (!Array.isArray(histIdxs) || histIdxs.length === 0) return null;
+    const row = res_(histIdxs[0]);
+    if (!row) return null;
+
+    // Parse amount (e.g. "0.330 MYR" → 0.33)
+    const amtRaw = res_(row.amt) || '';
+    const amtM   = amtRaw.toString().match(/([\d.]+)/);
+    const amount = amtM ? parseFloat(amtM[1]) : null;
+
+    // ISO dates → dd/MM/yyyy
+    function isoToDisplay(iso) {
+      if (!iso) return 'N/A';
+      const p = iso.toString().split('-');
+      return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : iso;
+    }
+    const exDate  = isoToDisplay(res_(row.dt));
+    const payDate = isoToDisplay(res_(row.pay));
+
+    return [amount || 'N/A', exDate, payDate];
+  } catch(e) {
+    Logger.log('fetchStockDividendData_ error: ' + e.message);
+    return null;
+  }
+}
+
+/**
+ * Returns the latest dividend amount for a stock from StockAnalysis.com.
+ * @param {string} code   Stock code (e.g. "MAYBANK", "AAPL", "D05", "0700")
+ * @param {string} market Market: "MY", "US", "SG", "HK"
+ * @return Dividend amount or "N/A"
+ * @customfunction
+ */
+function StockDividend(code, market) {
+  const d = fetchStockDividendData_(code, market);
+  return d ? d[0] : 'N/A';
+}
+
+/**
+ * Returns the latest ex-dividend date for a stock from StockAnalysis.com.
+ * @param {string} code   Stock code
+ * @param {string} market Market: "MY", "US", "SG", "HK"
+ * @return Ex-date string (dd/MM/yyyy) or "N/A"
+ * @customfunction
+ */
+function StockExDate(code, market) {
+  const d = fetchStockDividendData_(code, market);
+  return d ? d[1] : 'N/A';
+}
+
+/**
+ * Returns the latest pay date for a stock from StockAnalysis.com.
+ * @param {string} code   Stock code
+ * @param {string} market Market: "MY", "US", "SG", "HK"
+ * @return Pay-date string (dd/MM/yyyy) or "N/A"
+ * @customfunction
+ */
+function StockPayDate(code, market) {
+  const d = fetchStockDividendData_(code, market);
+  return d ? d[2] : 'N/A';
+}
+
 
 /**
  * Gets mutual fund NAV from FSMOne Malaysia
@@ -1668,7 +1803,7 @@ function saveStock(code, company, shares, buyPrice, sector, notes, linkedAccount
 
   sheet.setRowHeight(row, 34);
   const bg = row % 2 === 0 ? '#f8f9fa' : '#ffffff';
-  sheet.getRange(row, 1, 1, 14).setBackground(bg);
+  sheet.getRange(row, 1, 1, 15).setBackground(bg);
 
   sheet.getRange(row, 1).setValue(code.toUpperCase()).setFontWeight('bold').setVerticalAlignment('middle');
   sheet.getRange(row, 2).setValue(company).setVerticalAlignment('middle');
@@ -1679,11 +1814,39 @@ function saveStock(code, company, shares, buyPrice, sector, notes, linkedAccount
   sheet.getRange(row, 7).setFormula('=IF(ISNUMBER(E' + row + '),F' + row + '-C' + row + '*D' + row + ',0)').setNumberFormat(cfg.numFmt).setHorizontalAlignment('right').setVerticalAlignment('middle');
   sheet.getRange(row, 8).setFormula('=IF(D' + row + '*C' + row + '<>0,(E' + row + '-D' + row + ')/D' + row + '*100,0)').setNumberFormat('0.00"%"').setHorizontalAlignment('right').setVerticalAlignment('middle');
   sheet.getRange(row, 9).setValue(sector).setVerticalAlignment('middle');
-  sheet.getRange(row,10).setValue('').setVerticalAlignment('middle');
-  sheet.getRange(row,11).setValue('').setVerticalAlignment('middle');
-  sheet.getRange(row,12).setValue('').setVerticalAlignment('middle');
-  sheet.getRange(row,13).setValue(today).setFontSize(9).setFontColor('#9aa0a6').setHorizontalAlignment('center').setVerticalAlignment('middle');
-  sheet.getRange(row,14).setValue(notes||'').setFontSize(10).setFontColor('#9aa0a6').setVerticalAlignment('middle');
+  // Dividend formulas using native IMPORTHTML — no GAS fetching needed.
+  // References B{row} (ticker, e.g. MAYBANK) — col A has numeric code, col B has ticker.
+  // Table 1 on the dividend page: col1=Ex-Date, col2=Amount, col4=Pay Date
+  const aRef = 'B' + row;
+  var divUrl;
+  if      (market === 'MY') divUrl = 'CONCATENATE("https://stockanalysis.com/quote/klse/",' + aRef + ',"/dividend/")';
+  else if (market === 'US') divUrl = 'CONCATENATE("https://stockanalysis.com/stocks/",LOWER(' + aRef + '),"/dividend/")';
+  else if (market === 'SG') divUrl = 'CONCATENATE("https://stockanalysis.com/quote/sgx/",' + aRef + ',"/dividend/")';
+  else if (market === 'HK') divUrl = 'CONCATENATE("https://stockanalysis.com/quote/hkg/",' + aRef + ',"/dividend/")';
+  if (market !== 'CN' && divUrl) {
+    var ccy = market === 'MY' ? ' MYR' : market === 'SG' ? ' SGD' : market === 'HK' ? ' HKD' : '$';
+    // Dividend amount — strip currency suffix (e.g. ' MYR', ' USD', ' SGD', ' HKD')
+    const divAmtFml = '=IFERROR(VALUE(SUBSTITUTE(INDEX(IMPORTHTML(' + divUrl + ',"table",1),2,2),"' + ccy + '","")),"No Data")';
+    // Ex-date and Pay-date — plain text, col1 and col4
+    const exDateFml  = '=IFERROR(VALUE(SUBSTITUTE(INDEX(IMPORTHTML(CONCATENATE("https://stockanalysis.com/quote/klse/",$B' + row + ',"/dividend/"),"table",1),2,1)," MYR","")),"No Data")';
+    const payDateFml = '=IFERROR(VALUE(SUBSTITUTE(INDEX(IMPORTHTML(CONCATENATE("https://stockanalysis.com/quote/klse/",$B' + row + ',"/dividend/"),"table",1),2,4)," MYR","")),"No Data")';
+    const divYldFml = '=IFERROR(IMPORTXML(CONCATENATE("https://stockanalysis.com/quote/klse/",$B' + row + ',"/dividend/"),"/html/body/div/div[1]/div[2]/main/div[2]/div/div[2]/div[1]/div")*100,"N/A")';
+    sheet.getRange(row,10).setFormula(divAmtFml)
+      .setNumberFormat('0.0000').setHorizontalAlignment('right').setVerticalAlignment('middle');
+    sheet.getRange(row,11).setFormula(divYldFml)
+      .setNumberFormat('0.0000"%"').setHorizontalAlignment('right').setVerticalAlignment('middle');
+    sheet.getRange(row,12).setFormula(exDateFml)
+      .setNumberFormat('dd-mmm-yyyy').setHorizontalAlignment('center').setVerticalAlignment('middle');
+    sheet.getRange(row,13).setFormula(payDateFml)
+      .setNumberFormat('dd-mmm-yyyy').setHorizontalAlignment('center').setVerticalAlignment('middle');
+  } else {
+    sheet.getRange(row,10).setValue('N/A').setVerticalAlignment('middle');
+    sheet.getRange(row,11).setValue('N/A').setVerticalAlignment('middle');
+    sheet.getRange(row,12).setValue('N/A').setVerticalAlignment('middle');
+    sheet.getRange(row,13).setValue('N/A').setVerticalAlignment('middle');
+  }
+  sheet.getRange(row,14).setValue(today).setFontSize(9).setFontColor('#9aa0a6').setHorizontalAlignment('center').setVerticalAlignment('middle');
+  sheet.getRange(row,15).setValue(notes||'').setFontSize(10).setFontColor('#9aa0a6').setVerticalAlignment('middle');
 
   SpreadsheetApp.flush();
   const gainVal = sheet.getRange(row, 7).getValue();
@@ -1967,23 +2130,28 @@ function renderDashboardSheet() {
 
   const foreignCurrencies = [...allCurrencies];
 
-  // ── Batch FX fetch ──────────────────────────────────────────
+  // FX rates: dashboard now uses live GOOGLEFINANCE formulas in cells.
+  // toMYR() is only used here for section-total approximations at render time.
+  // We still snapshot rates for totals — but via a compact 1-col × 10-row temp sheet.
   const fxRates = {};
   if (foreignCurrencies.length > 0) {
     try {
-      const temp = ss.insertSheet('_FX_TEMP_');
+      let temp = ss.getSheetByName('_FX_TEMP_');
+      if (temp) ss.deleteSheet(temp);
+      temp = ss.insertSheet('_FX_TEMP_');
+      compactSheet_(temp, 10, 1); // 1 column, 10 rows only
       foreignCurrencies.forEach((cur, i) => {
-        temp.getRange(i+1, 1).setFormula('=GOOGLEFINANCE("CURRENCY:' + cur + BASE + '")');
+        temp.getRange(i + 1, 1).setFormula('=GOOGLEFINANCE("CURRENCY:' + cur + BASE + '")');
       });
       SpreadsheetApp.flush();
       Utilities.sleep(3000);
       foreignCurrencies.forEach((cur, i) => {
-        const val = temp.getRange(i+1, 1).getValue();
+        const val = temp.getRange(i + 1, 1).getValue();
         fxRates[cur] = (typeof val === 'number' && val > 0) ? val : null;
       });
       ss.deleteSheet(temp);
     } catch(e) {
-      try { ss.deleteSheet(ss.getSheetByName('_FX_TEMP_')); } catch(_) {}
+      try { const t = ss.getSheetByName('_FX_TEMP_'); if (t) ss.deleteSheet(t); } catch(_) {}
       foreignCurrencies.forEach(cur => { fxRates[cur] = null; });
     }
   }
@@ -2104,8 +2272,42 @@ function renderDashboardSheet() {
     const nativeFmt = fmtMap[acc.currency] || myrFmt;
     const myrResult = toMYR(acc.balance, acc.currency);
     if (myrResult.ok) accMyrTotal += myrResult.myr; else accFxMissing = true;
-    writeDataRow_(accStart+i, ACC_COLORS[i%ACC_COLORS.length], acc.name, acc.balance, acc.currency, nativeFmt, myrResult, null);
+    const row = accStart + i;
+    // Use writeDataRow_ for formatting/layout, then overwrite col 3 with a live formula
+    // so the balance updates automatically when transactions are added — no menu refresh needed.
+    writeDataRow_(row, ACC_COLORS[i%ACC_COLORS.length], acc.name, acc.balance, acc.currency, nativeFmt, myrResult, null);
+    // Overwrite static balance with live formula: last value in col F of account sheet
+    const safeSheet = acc.name.replace(/'/g, "''");
+    // LOOKUP(2,1/(F:F<>""),F:F) finds the LAST non-empty value in col F
+    // regardless of gaps — INDEX/COUNTA was returning the first transaction row
+    // because COUNTA counts the header too.
+    // F3:F1000 skips header rows; ISNUMBER ensures we only match numeric balance cells
+    // Use MAX(ARRAYFORMULA(IF(ISNUMBER(...)))) to get the ROW of the last numeric cell
+    // then INDEX to retrieve that row's value — works on unsorted data
+    const liveFormula = '=IFERROR(INDEX(\'' + safeSheet + '\'!F:F,MAX(ARRAYFORMULA(IF(ISNUMBER(\'' + safeSheet + '\'!F3:F1000),ROW(\'' + safeSheet + '\'!F3:F1000),0)))),0)';
+    dash.getRange(row, 3)
+      .setFormula(liveFormula)
+      .setNumberFormat(nativeFmt)
+      .setFontSize(12).setFontWeight('bold')
+      .setHorizontalAlignment('right').setVerticalAlignment('middle');
+    // MYR equivalent: if same currency, reference the live cell; else multiply by FX rate
+    const cur = normCurrency_(acc.currency);
+    const accFxFormula = cur === 'MYR'
+      ? '=' + dash.getRange(row, 3).getA1Notation()
+      : '=IFERROR(' + dash.getRange(row, 3).getA1Notation() + '*GOOGLEFINANCE("CURRENCY:' + cur + 'MYR"),0)';
+    dash.getRange(row, 6).setFormula(accFxFormula)
+      .setNumberFormat(myrFmt).setFontSize(12).setFontWeight('bold').setFontColor('#1a73e8')
+      .setHorizontalAlignment('right').setVerticalAlignment('middle');
+    // Also overwrite the Accounts Total row with a live SUM formula
   });
+  // Live SUM for total MYR column in accounts section
+  if (accounts.length > 0) {
+    const sumRange = dash.getRange(accStart, 6, accounts.length, 1).getA1Notation();
+    dash.getRange(accTotal, 6)
+      .setFormula('=IFERROR(SUM(' + sumRange + '),0)')
+      .setNumberFormat(myrFmt).setFontSize(12).setFontWeight('bold')
+      .setFontColor('#ffffff').setHorizontalAlignment('right').setVerticalAlignment('middle');
+  }
   if (!accounts.length) {
     dash.setRowHeight(accStart, 32);
     dash.getRange(accStart,2,1,4).merge().setValue('No accounts found. Create one via the menu.').setFontColor('#9aa0a6').setFontStyle('italic').setHorizontalAlignment('center');
@@ -2126,8 +2328,29 @@ function renderDashboardSheet() {
     if (myrResult.ok) stkMyrTotal += myrResult.myr; else stkFxMissing = true;
     const glSign = port.gainLoss >= 0 ? '+' : '';
     const glNote = '(' + glSign + port.gainLoss.toFixed(2) + ' ' + port.currency + '  ·  ' + port.count + ' stocks)';
-    writeDataRow_(stkStart+i, STK_COLORS[i%STK_COLORS.length], port.flag + '  ' + port.label, port.value, port.currency, nativeFmt, myrResult, glNote);
+    const row = stkStart + i;
+    writeDataRow_(row, STK_COLORS[i%STK_COLORS.length], port.flag + '  ' + port.label, port.value, port.currency, nativeFmt, myrResult, glNote);
+    // Overwrite col 3 with live SUM of market value column from portfolio sheet
+    const safeStkSheet = getStockSheetName_(port.market).replace(/'/g, "''");
+    dash.getRange(row, 3)
+      .setFormula('=IFERROR(SUMIF(\'' + safeStkSheet + '\'!A4:A1000,"<>",\'' + safeStkSheet + '\'!F4:F1000),0)')
+      .setNumberFormat(nativeFmt).setFontSize(12).setFontWeight('bold')
+      .setHorizontalAlignment('right').setVerticalAlignment('middle');
+    const stkCur = normCurrency_(port.currency);
+    const stkFxFormula = stkCur === 'MYR'
+      ? '=' + dash.getRange(row, 3).getA1Notation()
+      : '=IFERROR(' + dash.getRange(row, 3).getA1Notation() + '*GOOGLEFINANCE("CURRENCY:' + stkCur + 'MYR"),0)';
+    dash.getRange(row, 6).setFormula(stkFxFormula)
+      .setNumberFormat(myrFmt).setFontSize(12).setFontWeight('bold').setFontColor('#1a73e8')
+      .setHorizontalAlignment('right').setVerticalAlignment('middle');
   });
+  // Live SUM total for stocks
+  if (portfolios.length > 0) {
+    const stkSumRange = dash.getRange(stkStart, 6, portfolios.length, 1).getA1Notation();
+    dash.getRange(stkTotal, 6).setFormula('=IFERROR(SUM(' + stkSumRange + '),0)')
+      .setNumberFormat(myrFmt).setFontSize(12).setFontWeight('bold')
+      .setFontColor('#ffffff').setHorizontalAlignment('right').setVerticalAlignment('middle');
+  }
   if (!portfolios.length) {
     dash.setRowHeight(stkStart, 32);
     dash.getRange(stkStart,2,1,4).merge().setValue('No stock portfolios found. Create one via the menu.').setFontColor('#9aa0a6').setFontStyle('italic').setHorizontalAlignment('center');
@@ -2149,8 +2372,30 @@ function renderDashboardSheet() {
     const glVal  = mf.value - mf.cost;
     const glSign = glVal >= 0 ? '+' : '';
     const glNote = '(' + glSign + glVal.toFixed(2) + ' ' + mf.currency + '  ·  ' + mf.count + ' fund' + (mf.count !== 1 ? 's' : '') + ')';
-    writeDataRow_(mfStart+i, MF_COLORS[i%MF_COLORS.length], mf.currency + ' Funds', mf.value, mf.currency, nativeFmt, myrResult, glNote);
+    const row = mfStart + i;
+    writeDataRow_(row, MF_COLORS[i%MF_COLORS.length], mf.currency + ' Funds', mf.value, mf.currency, nativeFmt, myrResult, glNote);
+    // Live SUMIF on MF sheet col F (market value), filtering by currency in col I
+    const safeMfSheet = MF_SHEET_NAME.replace(/'/g, "''");
+    const mfCcyFilter = mf.currency;
+    dash.getRange(row, 3)
+      .setFormula('=IFERROR(SUMIF(\'' + safeMfSheet + '\'!I4:I1000,"' + mfCcyFilter + '",\'' + safeMfSheet + '\'!F4:F1000),0)')
+      .setNumberFormat(nativeFmt).setFontSize(12).setFontWeight('bold')
+      .setHorizontalAlignment('right').setVerticalAlignment('middle');
+    const mfCurN = normCurrency_(mf.currency);
+    const mfFxFormula = mfCurN === 'MYR'
+      ? '=' + dash.getRange(row, 3).getA1Notation()
+      : '=IFERROR(' + dash.getRange(row, 3).getA1Notation() + '*GOOGLEFINANCE("CURRENCY:' + mfCurN + 'MYR"),0)';
+    dash.getRange(row, 6).setFormula(mfFxFormula)
+      .setNumberFormat(myrFmt).setFontSize(12).setFontWeight('bold').setFontColor('#1a73e8')
+      .setHorizontalAlignment('right').setVerticalAlignment('middle');
   });
+  // Live SUM total for MF
+  if (mfFunds.length > 0) {
+    const mfSumRange = dash.getRange(mfStart, 6, mfFunds.length, 1).getA1Notation();
+    dash.getRange(mfTotal, 6).setFormula('=IFERROR(SUM(' + mfSumRange + '),0)')
+      .setNumberFormat(myrFmt).setFontSize(12).setFontWeight('bold')
+      .setFontColor('#ffffff').setHorizontalAlignment('right').setVerticalAlignment('middle');
+  }
   if (!mfFunds.length) {
     dash.setRowHeight(mfStart, 32);
     dash.getRange(mfStart,2,1,4).merge().setValue('No mutual funds found. Create one via the menu.').setFontColor('#9aa0a6').setFontStyle('italic').setHorizontalAlignment('center');
@@ -2189,8 +2434,24 @@ function renderDashboardSheet() {
       const glVal  = g.value - g.cost;
       const glSign = glVal >= 0 ? '+' : '';
       const glNote = '(' + glSign + glVal.toFixed(2) + ' USD  ·  ' + g.count + ' coin' + (g.count !== 1 ? 's' : '') + ')';
-      writeDataRow_(cryptoStart + i, CRYPTO_COLORS[i % CRYPTO_COLORS.length], '🪙 Crypto Holdings', g.value, g.currency, nativeFmt, myrResult, glNote);
+      const row = cryptoStart + i;
+      writeDataRow_(row, CRYPTO_COLORS[i % CRYPTO_COLORS.length], '🪙 Crypto Holdings', g.value, g.currency, nativeFmt, myrResult, glNote);
+      // Live SUMIF on crypto sheet col F (market value USD), col A non-empty = has a holding
+      const safeCryptoSheet = CRYPTO_SHEET_NAME.replace(/'/g, "''");
+      dash.getRange(row, 3)
+        .setFormula('=IFERROR(SUMIF(\'' + safeCryptoSheet + '\'!A4:A1000,"<>",\'' + safeCryptoSheet + '\'!F4:F1000),0)')
+        .setNumberFormat(nativeFmt).setFontSize(12).setFontWeight('bold')
+        .setHorizontalAlignment('right').setVerticalAlignment('middle');
+      dash.getRange(row, 6)
+        .setFormula('=IFERROR(' + dash.getRange(row, 3).getA1Notation() + '*GOOGLEFINANCE("CURRENCY:USDMYR"),0)')
+        .setNumberFormat(myrFmt).setFontSize(12).setFontWeight('bold').setFontColor('#1a73e8')
+        .setHorizontalAlignment('right').setVerticalAlignment('middle');
     });
+    // Live SUM total for crypto
+    const cryptoSumRange = dash.getRange(cryptoStart, 6, cryptoGroups.length, 1).getA1Notation();
+    dash.getRange(cryptoTotal, 6).setFormula('=IFERROR(SUM(' + cryptoSumRange + '),0)')
+      .setNumberFormat(myrFmt).setFontSize(12).setFontWeight('bold')
+      .setFontColor('#ffffff').setHorizontalAlignment('right').setVerticalAlignment('middle');
   } else {
     dash.setRowHeight(cryptoStart, 32);
     dash.getRange(cryptoStart,2,1,4).merge().setValue('No crypto holdings found. Create one via the menu.').setFontColor('#9aa0a6').setFontStyle('italic').setHorizontalAlignment('center');
@@ -2227,16 +2488,31 @@ function renderDashboardSheet() {
       dash.setRowHeight(goldStart + i, 36);
       dash.getRange(goldStart + i,1,1,6).setBackground(GOLD_COLORS[i % GOLD_COLORS.length]);
       dash.getRange(goldStart + i,2).setValue('🥇 ' + g.type + ' Gold  ' + (glNote)).setFontSize(10).setFontColor('#202124').setVerticalAlignment('middle');
-      dash.getRange(goldStart + i,3).setValue(g.value).setNumberFormat(myrFmt).setFontSize(12).setFontWeight('bold').setFontColor(g.value < 0 ? '#d93025' : '#202124').setHorizontalAlignment('right').setVerticalAlignment('middle');
+      // Live SUMIF on gold sheet col G (current value MYR), filtered by type in col A
+      const safeGoldSheet = GOLD_SHEET_NAME.replace(/'/g, "''");
+      dash.getRange(goldStart + i,3)
+        .setFormula('=IFERROR(SUMIF(\'' + safeGoldSheet + '\'!A4:A1000,"' + g.type + '",\'' + safeGoldSheet + '\'!G4:G1000),0)')
+        .setNumberFormat(myrFmt).setFontSize(12).setFontWeight('bold').setFontColor('#202124')
+        .setHorizontalAlignment('right').setVerticalAlignment('middle');
       dash.getRange(goldStart + i,4).setValue('MYR').setFontSize(9).setFontWeight('bold').setFontColor('#5f6368').setHorizontalAlignment('center').setVerticalAlignment('middle');
       dash.getRange(goldStart + i,5).setBackground('#e8f0fe');
-      dash.getRange(goldStart + i,6).setValue(g.value).setNumberFormat(myrFmt).setFontSize(12).setFontWeight('bold').setFontColor('#1a73e8').setHorizontalAlignment('right').setVerticalAlignment('middle');
+      dash.getRange(goldStart + i,6)
+        .setFormula('=' + dash.getRange(goldStart + i, 3).getA1Notation())
+        .setNumberFormat(myrFmt).setFontSize(12).setFontWeight('bold').setFontColor('#1a73e8')
+        .setHorizontalAlignment('right').setVerticalAlignment('middle');
     });
   } else {
     dash.setRowHeight(goldStart, 32);
     dash.getRange(goldStart,2,1,4).merge().setValue('No gold holdings found. Create one via the menu.').setFontColor('#9aa0a6').setFontStyle('italic').setHorizontalAlignment('center');
   }
   writeTotalRow_(goldTotal, 'Total Gold Portfolio', goldMyrTotal, '#e65100', 12);
+  // Overwrite gold total with live SUM
+  if (gr > 0) {
+    const goldSumRange = dash.getRange(goldStart, 6, Object.keys(goldByType).length, 1).getA1Notation();
+    dash.getRange(goldTotal, 6).setFormula('=IFERROR(SUM(' + goldSumRange + '),0)')
+      .setNumberFormat(myrFmt).setFontSize(12).setFontWeight('bold')
+      .setFontColor('#ffffff').setHorizontalAlignment('right').setVerticalAlignment('middle');
+  }
   dash.setRowHeight(goldHeader - 1, 16);
   dash.setRowHeight(goldHeader, 26);
 
@@ -2245,6 +2521,14 @@ function renderDashboardSheet() {
   const anyMissing  = accFxMissing || stkFxMissing || mfFxMissing || cryptoFxMissing;
   const grandTotal  = anyMissing ? null : accMyrTotal + stkMyrTotal + mfMyrTotal + cryptoMyrTotal + goldMyrTotal;
   writeTotalRow_(grandRow, '🏆  TOTAL NET WORTH  (in MYR)', grandTotal, '#0a2d6e', 14);
+  // Overwrite grand total with live SUM of all section total rows
+  {
+    const totalRefs = [accTotal, stkTotal, mfTotal, cryptoTotal, goldTotal]
+      .map(r => dash.getRange(r, 6).getA1Notation()).join('+');
+    dash.getRange(grandRow, 6).setFormula('=IFERROR(' + totalRefs + ',0)')
+      .setNumberFormat(myrFmt).setFontSize(16).setFontWeight('bold')
+      .setFontColor('#ffffff').setHorizontalAlignment('right').setVerticalAlignment('middle');
+  }
   dash.getRange(grandRow,1,1,6).setBackground('#0a2d6e');
   dash.setRowHeight(grandRow, 52);
   dash.getRange(grandRow,2).setFontSize(14).setFontWeight('bold').setFontColor('#ffffff').setVerticalAlignment('middle');
@@ -2350,6 +2634,223 @@ function refreshAllStockPrices() {
   SpreadsheetApp.getUi().alert('Prices refreshed!\n\nTip: Enable Auto-Refresh (5 min) from the menu to keep prices updated automatically.');
 }
 
+// ── DIVIDEND INFO (stockanalysis.com) ────────────────────────
+/**
+ * Fetches dividend amount, ex-date and pay date from stockanalysis.com
+ * for the currently active stock portfolio sheet.
+ * Writes into cols 10 (Dividend), 11 (Ex-Date), 12 (Pay Date).
+ *
+ * URL patterns:
+ *   MY  → https://stockanalysis.com/quote/klse/{CODE}/dividend/
+ *   US  → https://stockanalysis.com/stocks/{code}/dividend/
+ *   SG  → https://stockanalysis.com/quote/sgx/{CODE}/dividend/
+ *   HK  → https://stockanalysis.com/quote/hkg/{CODE}/dividend/
+ *   CN  → not supported (N/A)
+ */
+function refreshDividendInfo() {
+  // Writes IMPORTHTML formulas to Dividend/Ex-Date/Pay-Date columns for all rows.
+  // Run once to migrate existing rows; new rows get formulas automatically on add.
+  const ui    = SpreadsheetApp.getUi();
+  const sheet = getActivePortfolioSheet_();
+  if (!sheet) { ui.alert('Please open a Stock Portfolio sheet first.'); return; }
+
+  const market  = getSheetMarket_(sheet);
+  const lastRow = getLastStockRow_(sheet);
+  if (lastRow < 4) { ui.alert('No stocks found in this portfolio.'); return; }
+
+  if (market === 'CN') {
+    ui.alert('Dividend info is not available for China A-Shares on StockAnalysis.com.');
+    return;
+  }
+
+  const cfg = MARKET_CONFIG[market];
+  let updated = 0;
+
+  for (let row = 4; row <= lastRow; row++) {
+    const code = sheet.getRange(row, 1).getValue();
+    if (!code) continue;
+
+    const aRef = 'B' + row;  // Col B = ticker (e.g. MAYBANK), not numeric code
+    var divUrl;
+    if      (market === 'MY') divUrl = 'CONCATENATE("https://stockanalysis.com/quote/klse/",' + aRef + ',"/dividend/")';
+    else if (market === 'US') divUrl = 'CONCATENATE("https://stockanalysis.com/stocks/",LOWER(' + aRef + '),"/dividend/")';
+    else if (market === 'SG') divUrl = 'CONCATENATE("https://stockanalysis.com/quote/sgx/",' + aRef + ',"/dividend/")';
+    else if (market === 'HK') divUrl = 'CONCATENATE("https://stockanalysis.com/quote/hkg/",' + aRef + ',"/dividend/")';
+    if (!divUrl) continue;
+
+    var ccy = market === 'MY' ? ' MYR' : market === 'SG' ? ' SGD' : market === 'HK' ? ' HKD' : '$';
+    const divAmtFml  = '=IFERROR(VALUE(SUBSTITUTE(INDEX(IMPORTHTML(' + divUrl + ',"table",1),2,2),"' + ccy + '","")),"No Data")';
+    const divYldFml  = '=IFERROR(IMPORTXML(CONCATENATE("https://stockanalysis.com/quote/klse/",$B' + row + ',"/dividend/"),"/html/body/div/div[1]/div[2]/main/div[2]/div/div[2]/div[1]/div")*100,"N/A")';
+    const exDateFml  = '=IFERROR(VALUE(SUBSTITUTE(INDEX(IMPORTHTML(CONCATENATE("https://stockanalysis.com/quote/klse/",$B' + row + ',"/dividend/"),"table",1),2,1)," MYR","")),"No Data")';
+    const payDateFml = '=IFERROR(VALUE(SUBSTITUTE(INDEX(IMPORTHTML(CONCATENATE("https://stockanalysis.com/quote/klse/",$B' + row + ',"/dividend/"),"table",1),2,4)," MYR","")),"No Data")';
+
+    sheet.getRange(row, 10).setFormula(divAmtFml)
+      .setNumberFormat('0.0000').setHorizontalAlignment('right').setVerticalAlignment('middle');
+    sheet.getRange(row, 11).setFormula(divYldFml)
+      .setNumberFormat('0.0000"%"').setHorizontalAlignment('right').setVerticalAlignment('middle');
+    sheet.getRange(row, 12).setFormula(exDateFml)
+      .setNumberFormat('dd-mmm-yyyy').setHorizontalAlignment('center').setVerticalAlignment('middle');
+    sheet.getRange(row, 13).setFormula(payDateFml)
+      .setNumberFormat('dd-mmm-yyyy').setHorizontalAlignment('center').setVerticalAlignment('middle');
+    updated++;
+  }
+
+  ui.alert('✅ Dividend Formulas Set',
+    updated + ' row(s) updated.\n\n' +
+    'Dividend, Ex-Date and Pay-Date will now load automatically\n' +
+    'via IMPORTHTML from StockAnalysis.com.\n\n' +
+    'Values may take 10-30 seconds to appear as Google Sheets\n' +
+    'fetches the data in the background.',
+    ui.ButtonSet.OK);
+}
+
+/**
+ * Fetches dividend info for one stock from stockanalysis.com.
+ * Returns { amount, exDate, payDate } or null if unavailable.
+ */
+function fetchDividendInfo_(code, market) {
+  // StockAnalysis.com is a Svelte/SvelteKit app — the HTML page contains no dividend data.
+  // Instead we call the SvelteKit __data.json endpoint which returns the page data as JSON.
+  //
+  // JSON structure (nodes[2].data):
+  //   infoTable: { exdiv, annual, yield, frequency, payoutRatio, growth }
+  //   history:   [ { dt, amt, record, pay }, ... ]  (most recent first)
+  try {
+    const c = code.toString().trim();
+    let dataUrl;
+    if      (market === 'MY') dataUrl = 'https://stockanalysis.com/quote/klse/' + encodeURIComponent(c) + '/dividend/__data.json?x-sveltekit-trailing-slash=1';
+    else if (market === 'US') dataUrl = 'https://stockanalysis.com/stocks/'     + encodeURIComponent(c.toLowerCase()) + '/dividend/__data.json?x-sveltekit-trailing-slash=1';
+    else if (market === 'SG') dataUrl = 'https://stockanalysis.com/quote/sgx/'  + encodeURIComponent(c) + '/dividend/__data.json?x-sveltekit-trailing-slash=1';
+    else if (market === 'HK') dataUrl = 'https://stockanalysis.com/quote/hkg/'  + encodeURIComponent(c) + '/dividend/__data.json?x-sveltekit-trailing-slash=1';
+    else return null;
+
+    const res = UrlFetchApp.fetch(dataUrl, {
+      muteHttpExceptions: true,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'application/json'
+      }
+    });
+    if (res.getResponseCode() !== 200) {
+      Logger.log('fetchDividendInfo_ HTTP ' + res.getResponseCode() + ' for ' + code);
+      return null;
+    }
+
+    const json = JSON.parse(res.getContentText());
+
+    // SvelteKit data format: nodes array, dividend page is always the last node
+    // Each node uses a deduplication scheme: data[] array + uses index references
+    // We need to resolve the actual values from the data array
+    const nodes = json.nodes || [];
+    // Find the node containing dividend data (has 'infoTable' or 'history' key)
+    let divNode = null;
+    for (var n = nodes.length - 1; n >= 0; n--) {
+      const nd = nodes[n];
+      if (!nd || nd.type !== 'data' || !nd.data) continue;
+      // The data array is flat; keys are objects with index references
+      // Find the root object which has infoTable and history keys
+      const dataArr = nd.data;
+      for (var i = 0; i < dataArr.length; i++) {
+        const item = dataArr[i];
+        if (item && typeof item === 'object' && 'infoTable' in item && 'history' in item) {
+          divNode = { dataArr: dataArr, root: item };
+          break;
+        }
+      }
+      if (divNode) break;
+    }
+
+    if (!divNode) {
+      Logger.log('fetchDividendInfo_ no dividend node found for ' + code);
+      return null;
+    }
+
+    const dataArr = divNode.dataArr;
+    const root    = divNode.root;
+
+    // Helper: resolve an index reference to actual value
+    function resolve(ref) {
+      if (typeof ref === 'number') return dataArr[ref];
+      return ref;
+    }
+
+    // Get infoTable (has exdiv field)
+    const infoTableRef = root.infoTable;
+    const infoTable    = resolve(infoTableRef);
+    const exDateStr    = infoTable ? resolve(infoTable.exdiv) : null;
+
+    // Get history array (array of row index references)
+    const historyRef  = root.history;
+    const historyIdxs = resolve(historyRef); // array of indices into dataArr
+    let amount  = null;
+    let exDate  = exDateStr || null;
+    let payDate = null;
+
+    if (Array.isArray(historyIdxs) && historyIdxs.length > 0) {
+      // Most recent dividend is first
+      const firstRowRef = historyIdxs[0];
+      const firstRow    = resolve(firstRowRef);
+      if (firstRow && typeof firstRow === 'object') {
+        const dtRaw  = resolve(firstRow.dt);
+        const amtRaw = resolve(firstRow.amt);
+        const payRaw = resolve(firstRow.pay);
+
+        // dt is ISO format "2026-03-12" — convert to dd/MM/yyyy
+        if (dtRaw && !exDate) {
+          const parts = dtRaw.toString().split('-');
+          if (parts.length === 3) exDate = parts[2] + '/' + parts[1] + '/' + parts[0];
+        }
+
+        // amt is like "0.330 MYR" or "$0.330"
+        if (amtRaw) {
+          const amtMatch = amtRaw.toString().match(/([\d.]+)/);
+          if (amtMatch) amount = parseFloat(amtMatch[1]);
+        }
+
+        // pay is ISO format "2026-03-26"
+        if (payRaw) {
+          const parts = payRaw.toString().split('-');
+          if (parts.length === 3) payDate = parts[2] + '/' + parts[1] + '/' + parts[0];
+        }
+      }
+    }
+
+    // Also convert exDate from "Mar 12, 2026" format to dd/MM/yyyy if needed
+    if (exDate && exDate.includes(',')) {
+      try {
+        const d = new Date(exDate);
+        if (!isNaN(d)) {
+          const dd = String(d.getDate()).padStart(2, '0');
+          const mm = String(d.getMonth() + 1).padStart(2, '0');
+          exDate = dd + '/' + mm + '/' + d.getFullYear();
+        }
+      } catch(_) {}
+    }
+    if (payDate && payDate.includes(',')) {
+      try {
+        const d = new Date(payDate);
+        if (!isNaN(d)) {
+          const dd = String(d.getDate()).padStart(2, '0');
+          const mm = String(d.getMonth() + 1).padStart(2, '0');
+          payDate = dd + '/' + mm + '/' + d.getFullYear();
+        }
+      } catch(_) {}
+    }
+
+    if (!exDate && !amount) return null;
+
+    return {
+      amount:  amount  || null,
+      exDate:  exDate  || 'N/A',
+      payDate: payDate || 'N/A'
+    };
+  } catch(e) {
+    Logger.log('fetchDividendInfo_ error for ' + code + ': ' + e.message);
+    return null;
+  }
+}
+
+
 function autoRefreshAllPortfolios_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   ['MY','US','SG','HK','CN'].forEach(mkt => {
@@ -2381,7 +2882,7 @@ function refreshPortfolioSheet_(sheet) {
     const cell    = sheet.getRange(row, 5);
     const formula = cell.getFormula();
     if (formula) { cell.clearContent(); SpreadsheetApp.flush(); cell.setFormula(formula); }
-    sheet.getRange(row, 13).setValue(today);
+    sheet.getRange(row, 14).setValue(today);
   }
   SpreadsheetApp.flush();
   for (let row = 4; row <= getLastStockRow_(sheet); row++) {
@@ -2401,7 +2902,7 @@ function refreshStockSummary_(sheet, cfg) {
   const lastStockRow = getLastStockRow_(sheet);
   if (lastStockRow < 4) return;
 
-  const data = sheet.getRange(4, 1, lastStockRow-3, 14).getValues()
+  const data = sheet.getRange(4, 1, lastStockRow-3, 15).getValues()
     .filter(r => r[0] !== '' && typeof r[2] === 'number' && r[2] > 0);
 
   const totalCost  = data.reduce((s,r) => s + (r[2]*r[3]), 0);
@@ -2414,11 +2915,11 @@ function refreshStockSummary_(sheet, cfg) {
   // Clear below last stock row
   const maxRows    = sheet.getMaxRows();
   const clearStart = lastStockRow + 1;
-  if (clearStart <= maxRows) sheet.getRange(clearStart, 1, maxRows-clearStart+1, 14).clearContent().clearFormat();
+  if (clearStart <= maxRows) sheet.getRange(clearStart, 1, maxRows-clearStart+1, 15).clearContent().clearFormat();
 
   const summaryRow = lastStockRow + 2;
   sheet.setRowHeight(summaryRow, 30);
-  sheet.getRange(summaryRow, 1, 1, 14).merge()
+  sheet.getRange(summaryRow, 1, 1, 15).merge()
     .setValue('📊  PORTFOLIO SUMMARY').setBackground('#0d47a1').setFontColor('#ffffff')
     .setFontWeight('bold').setFontSize(11).setHorizontalAlignment('center').setVerticalAlignment('middle');
 
@@ -2634,6 +3135,7 @@ function fetchUsdMyrRate_() {
     let temp = ss.getSheetByName(tempName);
     if (temp) ss.deleteSheet(temp);
     temp = ss.insertSheet(tempName);
+    compactSheet_(temp, 10, 1); // 1 col × 10 rows
     temp.getRange(1, 1).setFormula('=GOOGLEFINANCE("CURRENCY:USDMYR")');
     SpreadsheetApp.flush();
     Utilities.sleep(3000);
@@ -2875,9 +3377,6 @@ function saveCrypto(symbol, name, qty, buyPrice, linkedAccount, notes) {
   const lastRow = getLastCryptoRow_(sheet);
   const row     = lastRow + 1;
 
-  // Fetch live price to write as value
-  const liveData  = fetchCryptoPrice_(symbol);
-  const livePrice = (liveData && !liveData.error) ? liveData.price : buyPrice;
 
   const mktValFormula  = '=C' + row + '*E' + row;
   const gainFormula    = '=F' + row + '-C' + row + '*D' + row;
@@ -2893,12 +3392,12 @@ function saveCrypto(symbol, name, qty, buyPrice, linkedAccount, notes) {
   sheet.getRange(row, CC.NAME)    .setValue(name)      .setFontSize(11).setVerticalAlignment('middle');
   sheet.getRange(row, CC.QTY)     .setValue(qty)       .setNumberFormat('#,##0.########').setHorizontalAlignment('right').setVerticalAlignment('middle');
   sheet.getRange(row, CC.BUY)     .setValue(buyPrice)  .setNumberFormat(usdFmt4).setHorizontalAlignment('right').setVerticalAlignment('middle');
-  sheet.getRange(row, CC.PRICE)   .setValue(livePrice) .setNumberFormat(usdFmt4).setHorizontalAlignment('right').setVerticalAlignment('middle');
+  sheet.getRange(row, CC.PRICE)   .setFormula('=IFERROR(IMPORTDATA(CONCATENATE("https://cryptoprices.cc/",A' + row + ')),0)').setNumberFormat(usdFmt4).setHorizontalAlignment('right').setVerticalAlignment('middle');
   sheet.getRange(row, CC.MKT_VAL) .setFormula(mktValFormula) .setNumberFormat(usdFmt2).setFontWeight('bold').setHorizontalAlignment('right').setVerticalAlignment('middle');
   sheet.getRange(row, CC.GAIN)    .setFormula(gainFormula)   .setNumberFormat(usdFmt2).setHorizontalAlignment('right').setVerticalAlignment('middle');
   sheet.getRange(row, CC.GAIN_PCT).setFormula(gainPctFormula).setNumberFormat('0.00"%"').setHorizontalAlignment('right').setVerticalAlignment('middle');
   sheet.getRange(row, CC.CHG24H)     .setValue('')           .setNumberFormat('0.00"%"').setHorizontalAlignment('right').setVerticalAlignment('middle');
-  sheet.getRange(row, CC.MKT_VAL_MYR).setValue('')           .setNumberFormat('"RM "#,##0.00').setFontWeight('bold').setFontColor('#1a237e').setHorizontalAlignment('right').setVerticalAlignment('middle');
+  sheet.getRange(row, CC.MKT_VAL_MYR).setFormula('=IFERROR(C' + row + '*E' + row + '*GOOGLEFINANCE("CURRENCY:USDMYR"),0)').setNumberFormat('"RM "#,##0.00').setFontWeight('bold').setFontColor('#1a237e').setHorizontalAlignment('right').setVerticalAlignment('middle');
   sheet.getRange(row, CC.ACCOUNT)    .setValue(linkedAccount || '').setFontSize(10).setFontColor('#5f6368').setVerticalAlignment('middle');
   sheet.getRange(row, CC.UPDATED) .setValue(today)     .setFontSize(9).setFontColor('#9aa0a6').setHorizontalAlignment('center').setVerticalAlignment('middle');
   sheet.getRange(row, CC.NOTES)   .setValue(notes || '').setFontSize(10).setFontColor('#9aa0a6').setVerticalAlignment('middle');
@@ -3132,6 +3631,18 @@ function refreshCryptoPrices_(sheet) {
   const lastRow = getLastCryptoRow_(sheet);
   if (lastRow < 4) return;
 
+  // Ensure all rows use IMPORTDATA formula for live price (migrates old setValue rows)
+  for (let row = 4; row <= lastRow; row++) {
+    const sym = sheet.getRange(row, CC.SYMBOL).getValue();
+    if (!sym) continue;
+    const priceCell = sheet.getRange(row, CC.PRICE);
+    if (!priceCell.getFormula()) {
+      priceCell.setFormula('=IFERROR(IMPORTDATA(CONCATENATE("https://cryptoprices.cc/",A' + row + ')),0)');
+    }
+  }
+  SpreadsheetApp.flush();
+  Utilities.sleep(2000); // allow IMPORTDATA to populate
+
   // Gather symbols and qtys
   const rowMeta = [];
   for (let row = 4; row <= lastRow; row++) {
@@ -3144,45 +3655,25 @@ function refreshCryptoPrices_(sheet) {
   // ── Batch fetch USD prices ───────────────────────────────────
   const priceMap = fetchCryptoBatch_(rowMeta.map(m => m.symbol));
 
-  // ── Fetch USD→MYR exchange rate via _FX_TEMP_ ───────────────
-  let usdMyr = null;
-  const tempName = '_FX_TEMP_';
-  try {
-    let temp = ss.getSheetByName(tempName);
-    if (temp) ss.deleteSheet(temp);
-    temp = ss.insertSheet(tempName);
-    temp.getRange(1, 1).setFormula('=GOOGLEFINANCE("CURRENCY:USDMYR")');
-    SpreadsheetApp.flush();
-    Utilities.sleep(3000);
-    const val = temp.getRange(1, 1).getValue();
-    if (typeof val === 'number' && val > 0) usdMyr = val;
-    ss.deleteSheet(temp);
-  } catch(e) {
-    try { const t = ss.getSheetByName(tempName); if (t) ss.deleteSheet(t); } catch(_) {}
-  }
-
-  // ── Write prices and RM values ───────────────────────────────
+  // ── Write prices — MKT_VAL_MYR uses live GOOGLEFINANCE formula, no FX fetch needed ──
   rowMeta.forEach(m => {
     const price = priceMap[m.symbol];
     if (price !== undefined) {
-      sheet.getRange(m.row, CC.PRICE).setValue(price);
+      // Re-set IMPORTDATA formula to force a fresh fetch
+      sheet.getRange(m.row, CC.PRICE)
+        .setFormula('=IFERROR(IMPORTDATA(CONCATENATE("https://cryptoprices.cc/",A' + m.row + ')),0)');
+      // Ensure live GOOGLEFINANCE formula for RM value
+      sheet.getRange(m.row, CC.MKT_VAL_MYR)
+        .setFormula('=IFERROR(C' + m.row + '*E' + m.row + '*GOOGLEFINANCE("CURRENCY:USDMYR"),0)')
+        .setNumberFormat('"RM "#,##0.00').setFontWeight('bold')
+        .setFontColor('#1a237e').setHorizontalAlignment('right');
       sheet.getRange(m.row, CC.UPDATED).setValue(today);
-      if (usdMyr !== null) {
-        const rmVal = m.qty * price * usdMyr;
-        sheet.getRange(m.row, CC.MKT_VAL_MYR)
-          .setValue(rmVal)
-          .setNumberFormat('"RM "#,##0.00')
-          .setFontWeight('bold')
-          .setFontColor('#1a237e')
-          .setHorizontalAlignment('right');
-      }
     }
   });
 
-  // Show FX rate used in subtitle row
+  // Update subtitle row
   sheet.getRange(2, 1, 1, 13).merge()
-    .setValue('Live prices via cryptoprices.cc  ·  USD → RM rate: ' +
-      (usdMyr ? usdMyr.toFixed(4) : 'unavailable') + '  \u00b7  Updated: ' + today)
+    .setValue('Live prices via cryptoprices.cc  ·  RM values via GOOGLEFINANCE(USDMYR)  ·  Updated: ' + today)
     .setBackground('#f3e5f5').setFontColor('#6d1b7b')
     .setFontSize(10).setHorizontalAlignment('center').setVerticalAlignment('middle');
 
@@ -3371,6 +3862,7 @@ function fetchGoldPrices_() {
     let temp = ss.getSheetByName(tempName);
     if (temp) ss.deleteSheet(temp);
     temp = ss.insertSheet(tempName);
+    compactSheet_(temp, 10, 1); // 1 col × 10 rows
     temp.getRange('A1').setFormula('=GOOGLEFINANCE("CURRENCY:XAUUSD")');
     temp.getRange('A2').setFormula('=GOOGLEFINANCE("CURRENCY:USDMYR")');
     SpreadsheetApp.flush();
@@ -4237,6 +4729,7 @@ function renderRetirementSheet() {
       let temp = ss.getSheetByName('_FX_TEMP_');
       if (temp) ss.deleteSheet(temp);
       temp = ss.insertSheet('_FX_TEMP_');
+      compactSheet_(temp, 10, 1); // 1 col × 10 rows
       fxList.forEach(function(cur, i) { temp.getRange(i + 1, 1).setFormula('=GOOGLEFINANCE("CURRENCY:' + cur + 'MYR")'); });
       SpreadsheetApp.flush();
       Utilities.sleep(3000);
@@ -4386,14 +4879,21 @@ function renderRetirementSheet() {
       sheet.getRange(row, 1, 1, NCOLS).setBackground(bg);
       sheet.getRange(row, COL_ICON) .setValue('🏦').setHorizontalAlignment('center').setVerticalAlignment('middle');
       sheet.getRange(row, COL_NAME) .setValue(acc.name).setFontSize(11).setFontWeight('bold').setFontColor('#202124').setVerticalAlignment('middle');
-      sheet.getRange(row, COL_VALUE).setValue(acc.balance).setNumberFormat(fmt).setFontSize(12).setFontWeight('bold').setHorizontalAlignment('right').setVerticalAlignment('middle');
+      // Live formula — always reads latest balance from account sheet
+      const safeAcc = acc.name.replace(/'/g, "''");
+      sheet.getRange(row, COL_VALUE)
+        .setFormula('=IFERROR(INDEX(\'' + safeAcc + '\'!F:F,MAX(ARRAYFORMULA(IF(ISNUMBER(\'' + safeAcc + '\'!F3:F1000),ROW(\'' + safeAcc + '\'!F3:F1000),0)))),0)')
+        .setNumberFormat(fmt).setFontSize(12).setFontWeight('bold').setHorizontalAlignment('right').setVerticalAlignment('middle');
       sheet.getRange(row, COL_CCY)  .setValue(acc.ccy).setFontSize(9).setFontWeight('bold').setFontColor('#5f6368').setHorizontalAlignment('center').setVerticalAlignment('middle');
-      sheet.getRange(row, COL_MYR)  .setBackground(r.ok ? '#e8f5e9' : '#fff3e0');
-      if (r.ok) {
-        sheet.getRange(row, COL_EXTRA).setValue(r.myr).setNumberFormat(myrFmt).setFontSize(12).setFontWeight('bold').setFontColor('#1b5e20').setHorizontalAlignment('right').setVerticalAlignment('middle');
-      } else {
-        sheet.getRange(row, COL_EXTRA).setValue('FX unavailable').setFontSize(10).setFontColor('#e65100').setHorizontalAlignment('right').setVerticalAlignment('middle');
-      }
+      sheet.getRange(row, COL_MYR)  .setBackground('#e8f5e9');
+      // Live MYR equivalent using GOOGLEFINANCE
+      const retAccCur = acc.ccy === 'MYR' ? 'MYR' : acc.ccy;
+      const retFxFormula = retAccCur === 'MYR'
+        ? '=' + sheet.getRange(row, COL_VALUE).getA1Notation()
+        : '=IFERROR(' + sheet.getRange(row, COL_VALUE).getA1Notation() + '*GOOGLEFINANCE("CURRENCY:' + retAccCur + 'MYR"),0)';
+      sheet.getRange(row, COL_EXTRA).setFormula(retFxFormula)
+        .setNumberFormat(myrFmt).setFontSize(12).setFontWeight('bold').setFontColor('#1b5e20')
+        .setHorizontalAlignment('right').setVerticalAlignment('middle');
     });
   } else {
     sheet.setRowHeight(ACC_START, 30);
